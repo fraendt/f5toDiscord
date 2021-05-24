@@ -21,10 +21,8 @@ def add_keyword(keyword, whole):
     soup = bs(p.text, 'html.parser')
     add = soup.find('form', {'action':'/add-alert'})
     csrf = add.find('input', {'name': 'csrf'})['value']
-    flags = ''
-    whole_word_only = False
-    keyword = 'pepega2'
+    flags = '' # do flags later
     data = {'keyword': keyword, 'flags': '', 'csrf': csrf}
-    if whole_word_only:
+    if whole:
         data['whole']=True
     s.post('https://f5bot.com/add-alert', data=data)

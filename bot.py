@@ -1,17 +1,30 @@
+import asyncio
+import logging
 import discord
 from discord.ext.commands import Bot
 from discord.ext.commands.errors import MissingRequiredArgument
 import os
 from dotenv import load_dotenv
 import collector
+import json
+import f5interface
 
+logging.basicConfig(level=logging.DEBUG)
 load_dotenv()
 
 try:
-    with open('anchors.txt') as f:
-        anchors = f.readlines()
+    with open('keywords.txt') as f:
+        keywords = f.readlines()
 except:
-    anchors = []
+    keywords = []
+
+try:
+    with open('anchors.json') as f:
+        anchors = json.load(f)
+except:
+    anchors = {'':[]}
+    anchors.update({k:[] for k in keywords})
+
 
 client = Bot(command_prefix="!")
 
@@ -29,31 +42,40 @@ async def echo(ctx, message=''):
     await ctx.send(message)
 
 @client.command(name='where')
-async def echo(ctx):
+async def where(ctx):
     global w
     w=ctx
     await ctx.send(ctx.channel)
 
 @client.command(name='anchor', description='send f5bot messages here')
-async def anchor(ctx, keyword='*'): # for lack of a better adjective
-    global anchors
+async def anchor(ctx, keyword=''): # for lack of a better adjective
     channel = ctx.channel.id
-    if channel not in anchors:
-        anchors.append(channel)
-        await ctx.send('anchored')
+    if keyword == '':
+        if channel in anchors['']:
+            await ctx.send('Channel already receiving all alerts.')
+            return
+        r = await confirmation(ctx, 'Are you sure you want to receive all alerts?')
+        if r:
+            anchors[''].append(channel)
+            logging.info(str(channel)+' '+ctx.channel.__str__()+' has been anchored for all keywords.')
+            await ctx.send('This channel will receive all alerts for all keywords.')
+            return
+        else:
+            await ctx.send('Cancelled.')
+            return      
+    if keyword not in keywords:
+        await ctx.send('Keyword has not been added yet.')
+        return
+    if channel in anchors[keyword]:
+        await ctx.send('Channel already receiving alerts for this keyword.')
     else:
-        await ctx.send('bruh channel already anchored')
-
-@client.command(name="test", description="test", help="test")
-async def test(ctx):
-    await ctx.send('W')
+        anchors[keyword].append(channel)
+        await ctx.send('Channel now receiving alerts for this keyword.')
 
 @client.command(name='check', description='check inbox', help='check inbox')
 async def check_mail(ctx):
+    logging.info(ctx.author.__str__()+' requested a inbox check')
     res = collector.check_inbox()
-    recipients = anchors
-    if ctx.channel.id not in recipients:
-        recipients.append(ctx.channel.id)
     if len(res) == 0:
         embed=discord.Embed(title="sorry bruh",
                         description="theres nothing",
@@ -68,18 +90,66 @@ async def check_mail(ctx):
                                 description=location,
                                 color=0x0096FF)
 
-            for anchor in recipients:
-                await client.get_channel(anchor).send(embed=embed)
-    
+            await send_alert(ctx, keyword, embed=embed)
+
+async def send_alert(ctx, keyword, **content):
+    recipients = anchors['']
+    try:
+        recipients += anchors[keyword]
+    except KeyError:
+        pass
+    await ctx.send(**content)
+    for recipient in recipients:
+        await client.get_channel(recipient).send(**content)
+
+async def confirmation(ctx, message):
+    m = await ctx.send(message)
+    yn = ['✅', '🚫']
+    for i in yn:
+        await m.add_reaction(i)
+    try:
+        reaction = await ctx.bot.wait_for('raw_reaction_add', timeout=30,
+                                          check=lambda r: r.user_id == ctx.message.author.id and str(r.emoji) in yn and r.message_id == m.id)
+    except asyncio.TimeoutError:
+        await ctx.send('Timed out.')
+        return False
+    else:
+        if str(reaction.emoji) == yn[0]:
+            return True
+        else:
+            return False
+    finally:
+        try:
+            await m.delete()
+        except:
+            pass
+    await ctx.send(reaction)
+    m.delete()
+
 @client.command(name="add", description="add keyword to look for", help="add keyword to look for")
-async def test(ctx):
-    await ctx.send('W')
+async def add(ctx, keyword=''):
+    if keyword=='':
+        await ctx.send('No keyword specified.')
+        return
+    if keyword in keywords:
+        await ctx.send('Keyword already added.')
+        return
+    confirm = await confirmation(ctx, 'Are you sure you want to add that?')
+
+    if not confirm:
+        await ctx.send('Cancelled.')
+        return
+    f5interface.add_keyword(keyword, False)
+    keywords.append(keyword)
+    await ctx.send('Keyword added.')
 
 
 @client.event
 async def on_ready():
-    print("Ready")
+    logging.info("Ready")
     
 client.run(os.getenv('LULW'))
-with open('anchors.txt') as f:
-    f.write('\n'.join(anchors))
+with open('anchors.json','w') as f:
+    json.dump(anchors, f, indent=4)
+with open('keywords.txt','w') as f:
+    f.write('\n'.join(keywords))
