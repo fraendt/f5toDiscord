@@ -90,15 +90,34 @@ async def check_mail(ctx):
                                 description=location,
                                 color=0x0096FF)
 
-            await send_alert(ctx, keyword, embed=embed)
+            await send_alert(keyword, ctx, embed=embed)
 
-async def send_alert(ctx, keyword, **content):
+async def check_mail_automatic():
+    while True:
+        logging.info('Running automatic mail check')
+        res = collector.check_inbox()
+        if len(res) == 0:
+            return
+        for i in res:
+            parsed = collector.parse(i)
+            for keyword, head, link, location in parsed:
+                embed=discord.Embed(title=head,
+                                    url=link,
+                                    description=location,
+                                    color=0x0096FF)
+
+                await send_alert(keyword, embed=embed)
+
+        await asyncio.sleep(5*60)
+
+async def send_alert(keyword, ctx=None, **content):
     recipients = anchors['']
     try:
         recipients += anchors[keyword]
     except KeyError:
         pass
-    await ctx.send(**content)
+    if ctx:
+        await ctx.send(**content)
     for recipient in recipients:
         await client.get_channel(recipient).send(**content)
 
@@ -147,6 +166,7 @@ async def add(ctx, keyword=''):
 @client.event
 async def on_ready():
     logging.info("Ready")
+    await check_mail_automatic()
     
 client.run(os.getenv('LULW'))
 with open('anchors.json','w') as f:
